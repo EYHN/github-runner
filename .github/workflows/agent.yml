@@ -1,0 +1,40 @@
+name: claw-agent
+run-name: claw / ${{ github.actor }} / ${{ inputs.session_id }}
+
+on:
+  workflow_dispatch:
+    inputs:
+      session_id:
+        description: Session id minted by the github-claw platform
+        required: true
+        type: string
+
+# Only one live job per session; different sessions run in parallel.
+concurrency:
+  group: claw-agent-${{ inputs.session_id }}
+  cancel-in-progress: false
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  agent:
+    runs-on: macos-latest
+    timeout-minutes: 360
+    env:
+      PLATFORM_URL: ${{ vars.PLATFORM_URL }}
+      SESSION_ID: ${{ inputs.session_id }}
+      OIDC_AUDIENCE: github-claw
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Run agent
+        shell: bash
+        run: |
+          set -euo pipefail
+          set +x
+          export CLAW_TMP="${RUNNER_TEMP}/claw"
+          mkdir -p "$CLAW_TMP"
+          scripts/exchange.sh
