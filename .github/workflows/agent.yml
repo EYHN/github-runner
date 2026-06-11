@@ -54,7 +54,7 @@ jobs:
       # browser). Runs with the claw user created but memory NOT yet mounted,
       # right before the agent starts. Failures show on this step but never
       # block the agent.
-      - name: Bootstrap (memory)
+      - name: Bootstrap
         shell: bash
         continue-on-error: true
         run: |
