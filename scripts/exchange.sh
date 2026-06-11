@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Thin bootstrap: prove identity via GitHub OIDC, fetch the credential bundle and
-# the dynamic script payload from the github-claw platform, then hand off.
+# the dynamic script payload from the github-claw platform, then persist env for
+# the next workflow steps (user bootstrap + agent).
 # This is the ONLY logic in this public repo; everything else is downloaded.
 
 set -euo pipefail
@@ -39,10 +40,7 @@ chmod 600 "$CLAW_BUNDLE"
 
 # Mask every secret field and export the session token.
 SESSION_TOKEN="$(jq -r '.session_token' "$CLAW_BUNDLE")"; echo "::add-mask::${SESSION_TOKEN}"
-jq -r '.bore.secret // empty' "$CLAW_BUNDLE" | while read -r v; do echo "::add-mask::$v"; done
-export SESSION_TOKEN
-export PLATFORM_URL CLAW_BUNDLE CLAW_TMP
-export ENV_KIND="$(jq -r '.env // "macos"' "$CLAW_BUNDLE")"
+ENV_KIND="$(jq -r '.env // "macos"' "$CLAW_BUNDLE")"
 
 # ---- 3. fetch the dynamic payload (scripts) ----
 log "Fetching payload (${ENV_KIND})..."
@@ -62,8 +60,14 @@ jq -c '.files[]' "$PAYLOAD" | while read -r f; do
   chmod "$mode" "$dest"
 done
 ENTRY="$(jq -r '.entrypoint' "$PAYLOAD")"
-export CLAW_DIR
 
-# ---- 4. hand off to the platform-provided bootstrap ----
-log "Handoff to ${ENTRY}..."
-exec "${CLAW_DIR}/${ENTRY}"
+# ---- 4. persist env for the next steps (user bootstrap + agent) ----
+log "Payload ready (entrypoint: ${ENTRY})."
+{
+  echo "SESSION_TOKEN=${SESSION_TOKEN}"
+  echo "CLAW_BUNDLE=${CLAW_BUNDLE}"
+  echo "CLAW_TMP=${CLAW_TMP}"
+  echo "CLAW_DIR=${CLAW_DIR}"
+  echo "ENV_KIND=${ENV_KIND}"
+  echo "CLAW_ENTRY=${ENTRY}"
+} >> "$GITHUB_ENV"
