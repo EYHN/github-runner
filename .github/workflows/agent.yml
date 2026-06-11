@@ -41,10 +41,19 @@ jobs:
           mkdir -p "$CLAW_TMP"
           scripts/exchange.sh
 
+      # Platform machine prep: tools, the claw user, VNC/SSH, session tunnel.
+      - name: Machine setup
+        shell: bash
+        run: |
+          set -euo pipefail
+          set +x
+          "${CLAW_DIR}/${CLAW_ENTRY}"
+
       # Optional user hook: bootstrap.sh at the memory bucket root (edit it at
       # ~/claw/bootstrap.sh from any agent session, or via the admin file
-      # browser). Delivered with the payload as user_bootstrap.sh. Failures
-      # show on this step but never block the agent.
+      # browser). Runs with the claw user created but memory NOT yet mounted,
+      # right before the agent starts. Failures show on this step but never
+      # block the agent.
       - name: Bootstrap (memory)
         shell: bash
         continue-on-error: true
@@ -57,9 +66,13 @@ jobs:
             echo "no bootstrap.sh in memory; skipping"
           fi
 
+      # Mount memory, configure the agent backend, hand off to the driver.
       - name: Run agent
         shell: bash
         run: |
           set -euo pipefail
           set +x
-          exec "${CLAW_DIR}/${CLAW_ENTRY}"
+          AGENT_ENTRY="${CLAW_DIR}/start_agent.sh"
+          # Fallback for payloads predating the setup/agent split.
+          [[ -f "$AGENT_ENTRY" ]] || AGENT_ENTRY="${CLAW_DIR}/${CLAW_ENTRY}"
+          exec "$AGENT_ENTRY"
