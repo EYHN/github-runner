@@ -50,8 +50,10 @@ jobs:
           "${CLAW_DIR}/${CLAW_ENTRY}"
 
       # Cache key for the memory bootstrap hook: derived from the hook's own
-      # contents, so editing the hook starts a fresh cache lineage (with the
-      # previous one restored as a base via restore-keys). Exposes $CLAW_CACHE.
+      # contents, so editing the hook gives a fresh cache (clean slate) rather
+      # than dragging the previous toolchain's leftovers forward. Exposes
+      # $CLAW_CACHE. No restore-keys: an exact-key miss means "bootstrap
+      # changed", which must NOT reuse the old cache.
       - name: Bootstrap cache key
         id: bootcache
         shell: bash
@@ -73,8 +75,6 @@ jobs:
         with:
           path: ~/claw-cache
           key: ${{ steps.bootcache.outputs.key }}
-          restore-keys: |
-            claw-cache-${{ env.ENV_KIND }}-
 
       # Optional user hook: bootstrap.sh at the memory bucket root (edit it at
       # ~/claw/bootstrap.sh from any agent session, or via the admin file
