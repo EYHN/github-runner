@@ -30,7 +30,9 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Run agent
+      # OIDC exchange + payload download. Persists CLAW_* env (incl. the
+      # session token) to GITHUB_ENV for the following steps.
+      - name: Exchange credentials
         shell: bash
         run: |
           set -euo pipefail
@@ -38,3 +40,26 @@ jobs:
           export CLAW_TMP="${RUNNER_TEMP}/claw"
           mkdir -p "$CLAW_TMP"
           scripts/exchange.sh
+
+      # Optional user hook: bootstrap.sh at the memory bucket root (edit it at
+      # ~/claw/bootstrap.sh from any agent session, or via the admin file
+      # browser). Delivered with the payload as user_bootstrap.sh. Failures
+      # show on this step but never block the agent.
+      - name: Bootstrap (memory)
+        shell: bash
+        continue-on-error: true
+        run: |
+          set -euo pipefail
+          set +x
+          if [[ -f "${CLAW_DIR}/user_bootstrap.sh" ]]; then
+            "${CLAW_DIR}/user_bootstrap.sh"
+          else
+            echo "no bootstrap.sh in memory; skipping"
+          fi
+
+      - name: Run agent
+        shell: bash
+        run: |
+          set -euo pipefail
+          set +x
+          exec "${CLAW_DIR}/${CLAW_ENTRY}"
