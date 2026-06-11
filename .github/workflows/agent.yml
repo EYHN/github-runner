@@ -41,7 +41,7 @@ jobs:
           mkdir -p "$CLAW_TMP"
           scripts/exchange.sh
 
-      # Platform machine prep: tools, the claw user, VNC/SSH, session tunnel.
+      # Platform machine prep: tools, the claw user, SSH, session tunnel.
       - name: Machine setup
         shell: bash
         run: |
@@ -49,12 +49,39 @@ jobs:
           set +x
           "${CLAW_DIR}/${CLAW_ENTRY}"
 
+      # Cache key for the memory bootstrap hook: derived from the hook's own
+      # contents, so editing the hook starts a fresh cache lineage (with the
+      # previous one restored as a base via restore-keys). Exposes $CLAW_CACHE.
+      - name: Bootstrap cache key
+        id: bootcache
+        shell: bash
+        run: |
+          set -euo pipefail
+          set +x
+          HOOK="${CLAW_DIR}/user_bootstrap.sh"
+          if [[ -f "$HOOK" ]]; then
+            H="$(shasum -a 256 "$HOOK" | cut -d' ' -f1)"
+          else
+            H="none"
+          fi
+          echo "key=claw-cache-${ENV_KIND}-${H}" >> "$GITHUB_OUTPUT"
+          echo "CLAW_CACHE=${HOME}/claw-cache" >> "$GITHUB_ENV"
+          mkdir -p "${HOME}/claw-cache"
+
+      - name: Restore bootstrap cache
+        uses: actions/cache/restore@v4
+        with:
+          path: ~/claw-cache
+          key: ${{ steps.bootcache.outputs.key }}
+          restore-keys: |
+            claw-cache-${{ env.ENV_KIND }}-
+
       # Optional user hook: bootstrap.sh at the memory bucket root (edit it at
       # ~/claw/bootstrap.sh from any agent session, or via the admin file
       # browser). Runs with the claw user created but memory NOT yet mounted,
-      # right before the agent starts. Failures show on this step but never
-      # block the agent.
-      - name: Bootstrap
+      # right before the agent starts. Route slow downloads into $CLAW_CACHE to
+      # persist them across machines. Failures show here but never block the agent.
+      - name: Bootstrap (memory)
         shell: bash
         continue-on-error: true
         run: |
@@ -65,6 +92,15 @@ jobs:
           else
             echo "no bootstrap.sh in memory; skipping"
           fi
+
+      # Persist whatever the hook routed into $CLAW_CACHE. Skips upload when the
+      # exact key already exists (unchanged hook), so steady state is free.
+      - name: Save bootstrap cache
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: ~/claw-cache
+          key: ${{ steps.bootcache.outputs.key }}
 
       # Mount memory, configure the agent backend, hand off to the driver.
       - name: Run agent
