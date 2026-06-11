@@ -93,17 +93,12 @@ jobs:
             echo "no bootstrap.sh in memory; skipping"
           fi
 
-      # Persist whatever the hook routed into $CLAW_CACHE. Skips upload when the
-      # exact key already exists (unchanged hook), so steady state is free.
-      - name: Save bootstrap cache
-        if: always()
-        uses: actions/cache/save@v4
-        with:
-          path: ~/claw-cache
-          key: ${{ steps.bootcache.outputs.key }}
-
-      # Mount memory, configure the agent backend, hand off to the driver.
-      - name: Run agent
+      # Start the agent in the BACKGROUND so it begins serving immediately; the
+      # slow cache upload (next step) and the agent then run concurrently. The
+      # process survives into the wait step (Actions doesn't kill background
+      # jobs between steps). start_agent.sh mounts memory, configures the
+      # backend, and runs the driver.
+      - name: Start agent
         shell: bash
         run: |
           set -euo pipefail
@@ -111,4 +106,33 @@ jobs:
           AGENT_ENTRY="${CLAW_DIR}/start_agent.sh"
           # Fallback for payloads predating the setup/agent split.
           [[ -f "$AGENT_ENTRY" ]] || AGENT_ENTRY="${CLAW_DIR}/${CLAW_ENTRY}"
-          exec "$AGENT_ENTRY"
+          nohup bash "$AGENT_ENTRY" >"${CLAW_TMP}/agent.log" 2>&1 &
+          echo $! > "${CLAW_TMP}/agent.pid"
+          sleep 3   # surface immediate crashes (mount/setup) in this step
+          kill -0 "$(cat "${CLAW_TMP}/agent.pid")" 2>/dev/null \
+            && echo "agent started (pid $(cat "${CLAW_TMP}/agent.pid"))" \
+            || { echo "agent exited during startup:"; cat "${CLAW_TMP}/agent.log"; exit 1; }
+
+      # Persist whatever the hook routed into $CLAW_CACHE, concurrently with the
+      # now-running agent. Skips upload when the exact key already exists.
+      - name: Save bootstrap cache
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: ~/claw-cache
+          key: ${{ steps.bootcache.outputs.key }}
+
+      # Hold the job open for the session's lifetime by following the agent
+      # process; stream its log into this step. Exits when the driver does
+      # (session closed) or when the platform cancels the run.
+      - name: Run agent
+        shell: bash
+        run: |
+          set -uo pipefail
+          set +x
+          PID="$(cat "${CLAW_TMP}/agent.pid")"
+          tail -f "${CLAW_TMP}/agent.log" &
+          TAIL=$!
+          while kill -0 "$PID" 2>/dev/null; do sleep 10; done
+          kill "$TAIL" 2>/dev/null || true
+          echo ">>> agent process exited"
